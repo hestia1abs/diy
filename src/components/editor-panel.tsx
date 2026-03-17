@@ -21,6 +21,7 @@ export function EditorPanel({ sidebarActive }: { sidebarActive: boolean }) {
     getFileById,
     dirtyFiles,
     markDirty,
+    saveAll,
     setCursorPosition,
   } = useProject()
 
@@ -46,10 +47,10 @@ export function EditorPanel({ sidebarActive }: { sidebarActive: boolean }) {
       // eslint-disable-next-line no-bitwise
       2048 | 49, // KeyMod.CtrlCmd | KeyCode.KeyS
       () => {
-        // Trigger save - markClean is handled by saveAll
+        saveAll()
       }
     )
-  }, [setCursorPosition])
+  }, [setCursorPosition, saveAll])
 
   const GetFileIcon = (name: string) => {
     if (name.endsWith('.ino')) return '◆'

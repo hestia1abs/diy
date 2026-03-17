@@ -1,15 +1,18 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { Play, Upload, Save, Download, Settings, ChevronDown } from 'lucide-react'
 import { useProject } from '@/lib/project-context'
 import { useConsole } from '@/lib/console-context'
 import { CompileFirmware } from '@/lib/Api'
+import { WebSerialConnection, IsWebSerialSupported } from '@/lib/WebSerial'
 
 export function CompileToolbar() {
-  const { project, saveAll, getAllFiles } = useProject()
+  const { project, setProject, saveAll, getAllFiles } = useProject()
   const { addLog, clearLogs, clearProblems, addProblem, setBuildProgress, setIsCompiling, isCompiling, setActiveBottomTab } = useConsole()
   const [showBoardMenu, setShowBoardMenu] = useState(false)
+  const [isFlashing, setIsFlashing] = useState(false)
+  const lastBinaryRef = useRef<Blob | null>(null)
 
   const boards = [
     { id: 'esp32', name: 'ESP32 Dev Module' },
@@ -77,6 +80,7 @@ export function CompileToolbar() {
 
       setBuildProgress({ status: 'success', percentage: 100, currentStep: 'Build complete!' })
       addLog(`Compilation successful! Binary size: ${(blob.size / 1024).toFixed(1)} KB`, 'success')
+      lastBinaryRef.current = blob
 
       // Auto-download the binary
       const url = URL.createObjectURL(blob)
@@ -112,6 +116,49 @@ export function CompileToolbar() {
     }
   }, [isCompiling, project, selectedBoard, getAllFiles, addLog, clearLogs, clearProblems, addProblem, setBuildProgress, setIsCompiling, setActiveBottomTab])
 
+  const HandleUpload = useCallback(async () => {
+    if (isFlashing || !lastBinaryRef.current) {
+      addLog('No compiled binary available. Compile first, then upload.', 'warning')
+      setActiveBottomTab('output')
+      return
+    }
+    if (!IsWebSerialSupported()) {
+      addLog('Web Serial API is not supported in this browser. Use Chrome, Edge, or Opera.', 'error')
+      return
+    }
+
+    setIsFlashing(true)
+    addLog('Starting flash...', 'log')
+    setActiveBottomTab('output')
+
+    const flashConnection = new WebSerialConnection()
+    try {
+      await flashConnection.Connect({ baudRate: 115200 })
+      addLog('Port opened. Sending binary...', 'log')
+
+      const arrayBuffer = await lastBinaryRef.current.arrayBuffer()
+      const bytes = new Uint8Array(arrayBuffer)
+
+      // Send binary in chunks
+      const chunkSize = 1024
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.slice(i, i + chunkSize)
+        await flashConnection.Write(new TextDecoder().decode(chunk))
+        const percent = Math.round(((i + chunk.length) / bytes.length) * 100)
+        setBuildProgress({ percentage: percent, currentStep: `Flashing: ${percent}%` })
+      }
+
+      addLog(`Flash complete! Sent ${(bytes.length / 1024).toFixed(1)} KB.`, 'success')
+      setBuildProgress({ status: 'success', percentage: 100, currentStep: 'Flash complete!' })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Flash failed'
+      addLog(`Flash failed: ${message}`, 'error')
+    } finally {
+      await flashConnection.Disconnect()
+      setIsFlashing(false)
+    }
+  }, [isFlashing, addLog, setActiveBottomTab, setBuildProgress])
+
   const HandleSave = useCallback(() => {
     saveAll()
     addLog('Project saved.', 'success')
@@ -135,11 +182,17 @@ export function CompileToolbar() {
 
       {/* Upload button */}
       <button
-        className="flex items-center gap-2 px-4 py-2 rounded font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors text-sm"
+        onClick={() => void HandleUpload()}
+        disabled={isCompiling || isFlashing}
+        className={`flex items-center gap-2 px-4 py-2 rounded font-medium transition-colors text-sm ${
+          isFlashing
+            ? 'bg-amber-700 text-white cursor-not-allowed opacity-75'
+            : 'bg-slate-700 hover:bg-slate-600 text-slate-200'
+        }`}
         title="Upload to device (Web Serial)"
       >
-        <Upload size={14} />
-        Upload
+        <Upload size={14} className={isFlashing ? 'animate-pulse' : ''} />
+        {isFlashing ? 'Flashing...' : 'Upload'}
       </button>
 
       <div className="w-px h-6 bg-slate-700" />
@@ -180,7 +233,7 @@ export function CompileToolbar() {
                 key={board.id}
                 onClick={() => {
                   setShowBoardMenu(false)
-                  // Board change would update project context
+                  setProject({ ...project, boardType: board.id })
                 }}
                 className={`w-full text-left px-4 py-2 text-sm hover:bg-slate-700 transition-colors ${
                   board.id === project.boardType ? 'text-blue-400' : 'text-slate-300'

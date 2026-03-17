@@ -4,6 +4,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Trash2, Send, Plug, PlugZap, ChevronDown } from 'lucide-react'
 import { useConsole } from '@/lib/console-context'
 import { useProject } from '@/lib/project-context'
+import { WebSerialConnection, IsWebSerialSupported } from '@/lib/WebSerial'
+
+const serialConnection = new WebSerialConnection()
 
 export function ToolPanels({ activePanel }: { activePanel: string; style?: React.CSSProperties }) {
   const {
@@ -21,6 +24,20 @@ export function ToolPanels({ activePanel }: { activePanel: string; style?: React
   const [isResizing, setIsResizing] = useState(false)
   const outputRef = useRef<HTMLDivElement>(null)
   const serialRef = useRef<HTMLDivElement>(null)
+
+  // Wire up WebSerial callbacks
+  useEffect(() => {
+    serialConnection.SetOnData((data) => {
+      addSerialLog(data.trimEnd(), 'log')
+    })
+    serialConnection.SetOnError((error) => {
+      addSerialLog(`Error: ${error.message}`, 'error')
+    })
+    serialConnection.SetOnDisconnect(() => {
+      setSerialConfig({ connected: false, port: null })
+      addSerialLog('Device disconnected.', 'warning')
+    })
+  }, [addSerialLog, setSerialConfig])
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -57,12 +74,39 @@ export function ToolPanels({ activePanel }: { activePanel: string; style?: React
     document.addEventListener('mouseup', HandleMouseUp)
   }, [panelHeight])
 
-  const HandleSerialSend = useCallback(() => {
-    if (serialInput.trim()) {
-      addSerialLog(`> ${serialInput}`, 'log')
-      setSerialInput('')
+  const HandleSerialConnect = useCallback(async () => {
+    if (serialConfig.connected) {
+      await serialConnection.Disconnect()
+      setSerialConfig({ connected: false, port: null })
+      addSerialLog('Disconnected.', 'warning')
+    } else {
+      if (!IsWebSerialSupported()) {
+        addSerialLog('Web Serial API is not supported in this browser. Use Chrome, Edge, or Opera.', 'error')
+        return
+      }
+      try {
+        await serialConnection.Connect({ baudRate: serialConfig.baudRate })
+        setSerialConfig({ connected: true, port: 'USB' })
+        addSerialLog(`Connected at ${serialConfig.baudRate} baud.`, 'success')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to connect'
+        addSerialLog(`Connection failed: ${message}`, 'error')
+      }
     }
-  }, [serialInput, addSerialLog])
+  }, [serialConfig, setSerialConfig, addSerialLog])
+
+  const HandleSerialSend = useCallback(async () => {
+    if (serialInput.trim() && serialConfig.connected) {
+      try {
+        await serialConnection.WriteLine(serialInput)
+        addSerialLog(`> ${serialInput}`, 'log')
+        setSerialInput('')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to send'
+        addSerialLog(`Send error: ${message}`, 'error')
+      }
+    }
+  }, [serialInput, serialConfig.connected, addSerialLog])
 
   const HandleProblemClick = useCallback((problem: { file: string; line: number }) => {
     if (problem.file) {
@@ -158,7 +202,7 @@ export function ToolPanels({ activePanel }: { activePanel: string; style?: React
 
               {/* Connect/Disconnect */}
               <button
-                onClick={() => setSerialConfig({ connected: !serialConfig.connected })}
+                onClick={() => void HandleSerialConnect()}
                 className={`p-1 rounded transition-colors ${
                   serialConfig.connected
                     ? 'text-green-400 hover:text-green-300 hover:bg-slate-700'
@@ -238,13 +282,13 @@ export function ToolPanels({ activePanel }: { activePanel: string; style?: React
               <input
                 value={serialInput}
                 onChange={(e) => setSerialInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') HandleSerialSend() }}
+                onKeyDown={(e) => { if (e.key === 'Enter') void HandleSerialSend() }}
                 placeholder={serialConfig.connected ? 'Type to send...' : 'Connect first...'}
                 disabled={!serialConfig.connected}
                 className="flex-1 bg-transparent text-xs text-slate-200 outline-none placeholder-slate-600 disabled:opacity-50"
               />
               <button
-                onClick={HandleSerialSend}
+                onClick={() => void HandleSerialSend()}
                 disabled={!serialConfig.connected || !serialInput.trim()}
                 className="text-slate-400 hover:text-slate-100 disabled:opacity-30 transition-colors"
               >
