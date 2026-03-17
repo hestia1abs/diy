@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /.env
+Disallow: /next/
+
+# Specify sitemap
+Sitemap: https://cloud.hestialabs.in/sitemap.xml
+
+# Crawl delay
+Crawl-delay: 1
