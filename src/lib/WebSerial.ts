@@ -9,13 +9,40 @@
  * feature detection, port selection, read/write, and cleanup.
  */
 
-export interface SerialOptions {
+/**
+ * Web Serial API Types
+ * @see https://wicg.github.io/serial/
+ */
+
+type ParityType = 'none' | 'even' | 'odd' | 'mark' | 'space'
+type FlowControlType = 'none' | 'hardware'
+
+interface SerialPort {
+  readable: ReadableStream<Uint8Array> | null
+  writable: WritableStream<Uint8Array> | null
+  open(options: SerialOptions): Promise<void>
+  close(): Promise<void>
+  getInfo(): { usbVendorId?: number; usbProductId?: number }
+}
+
+interface SerialOptions {
   baudRate: number
   dataBits?: number
   stopBits?: number
   parity?: ParityType
   bufferSize?: number
   flowControl?: FlowControlType
+}
+
+declare global {
+  interface Navigator {
+    serial: {
+      requestPort(): Promise<SerialPort>
+      getPorts(): Promise<SerialPort[]>
+      addEventListener(type: 'connect' | 'disconnect', listener: (event: { target: SerialPort }) => void): void
+      removeEventListener(type: 'connect' | 'disconnect', listener: (event: { target: SerialPort }) => void): void
+    }
+  }
 }
 
 export type SerialEventHandler = (data: string) => void
@@ -94,11 +121,12 @@ export class WebSerialConnection {
       throw new Error('Serial port is not open for writing')
     }
 
-    this.writer = this.port.writable.getWriter()
+    const writer = this.port.writable.getWriter()
+    this.writer = writer
     try {
-      await this.writer.write(this.encoder.encode(data))
+      await writer.write(this.encoder.encode(data))
     } finally {
-      this.writer.releaseLock()
+      writer.releaseLock()
       this.writer = null
     }
   }
@@ -146,10 +174,11 @@ export class WebSerialConnection {
     if (!this.port?.readable) return
 
     while (this.port.readable && !this.abortController?.signal.aborted) {
-      this.reader = this.port.readable.getReader()
+      const reader = this.port.readable.getReader()
+      this.reader = reader
       try {
         while (true) {
-          const { value, done } = await this.reader.read()
+          const { value, done } = await reader.read()
           if (done) break
           if (value) {
             const decoded = this.decoder.decode(value, { stream: true })
@@ -162,7 +191,7 @@ export class WebSerialConnection {
         }
       } finally {
         try {
-          this.reader.releaseLock()
+          reader.releaseLock()
         } catch {
           // Reader lock may already be released
         }
