@@ -1,102 +1,88 @@
 'use client'
 
-import { useState } from 'react'
-import { X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useCallback, useEffect, useRef } from 'react'
+import { X, Circle } from 'lucide-react'
 import dynamic from 'next/dynamic'
+import { useProject } from '@/lib/project-context'
+import type { editor } from 'monaco-editor'
 
 const Editor = dynamic(() => import('@monaco-editor/react').then(mod => mod.default), {
   ssr: false,
   loading: () => <div className="flex items-center justify-center h-full text-slate-400">Loading editor...</div>
 })
 
-interface File {
-  id: string
-  name: string
-  language: string
-  content: string
-}
-
 export function EditorPanel({ sidebarActive }: { sidebarActive: boolean }) {
-  const [files, setFiles] = useState<File[]>([
-    {
-      id: '1',
-      name: 'BlueLED.ino',
-      language: 'cpp',
-      content: `// ----- HxTP Provisioning Payload ----
-// Copy these values from the Hestia Labs Cloud Console when provisioning a device
-static const char* API_BASE_URL = "https://cloud.hestialabs.in/api/v1";
-static const char* DEVICE_ID = "fc205f63-9f70-48ae-9740-3872bb718511";
-static const char* TENANT_ID = "b6865f98-4627-4869-b399-ae3499b0d30a";
-static const char* DEVICE_SECRET = "99031887a84ba0cbe7ceb588b3596392cf07fc5d5fe0c5e22e534a6c354cd2f1";
+  const {
+    project,
+    openFile,
+    closeFile,
+    selectFile,
+    updateFile,
+    getFileById,
+    dirtyFiles,
+    markDirty,
+    setCursorPosition,
+  } = useProject()
 
-// ----- Global HxTP Client ----
-hxtp::HXTPClient* hxtpClient = nullptr;
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
+  const activeFile = project.selectedFile ? getFileById(project.selectedFile) : null
 
-// ----- SDK Event Callbacks ----
-void onHxtpStateChange(hxtp::HxtpClientState oldState, hxtp::HxtpClientState newState, void*) {
-  Serial.println("[HXTP] State changed to: ");
-  Serial.println(hxtpClient->stateStr());
-}
-
-void onHxtpError(HxtpError err, const char* msg, void*) {
-  Serial.printf("[HXTP] ERROR %d: %s\\n", static_cast<int>(err), msg ? msg : "Unknown");
-}`,
-    },
-    {
-      id: '2',
-      name: 'config.h',
-      language: 'cpp',
-      content: `#ifndef CONFIG_H
-#define CONFIG_H
-
-// Board Configuration
-#define BOARD_TYPE ESP32_DEV_MODULE
-#define CLOCK_SPEED 240
-#define FLASH_SIZE 4096
-
-// Network Configuration
-#define WIFI_SSID "your_ssid"
-#define WIFI_PASSWORD "your_password"
-#define NTP_SERVER "pool.ntp.org"
-
-// Device Configuration
-#define DEVICE_NAME "BlueLED"
-#define FIRMWARE_VERSION "1.0.0"
-
-// Pin Definitions
-#define LED_PIN 13
-#define BUTTON_PIN 2
-#define SENSOR_PIN A0
-
-#endif`,
-    },
-  ])
-
-  const [activeFileId, setActiveFileId] = useState(files[0].id)
-  const [tabScroll, setTabScroll] = useState(0)
-
-  const activeFile = files.find(f => f.id === activeFileId) || files[0]
-
-  const handleEditorChange = (value: string | undefined) => {
-    if (value) {
-      setFiles(files.map(f => f.id === activeFileId ? { ...f, content: value } : f))
+  const HandleEditorChange = useCallback((value: string | undefined) => {
+    if (value !== undefined && project.selectedFile) {
+      updateFile(project.selectedFile, value)
+      markDirty(project.selectedFile)
     }
-  }
+  }, [project.selectedFile, updateFile, markDirty])
 
-  const closeFile = (id: string) => {
-    const newFiles = files.filter(f => f.id !== id)
-    if (newFiles.length === 0) return
-    setFiles(newFiles)
-    if (activeFileId === id) {
-      setActiveFileId(newFiles[0].id)
-    }
-  }
+  const HandleEditorMount = useCallback((editor: editor.IStandaloneCodeEditor) => {
+    editorRef.current = editor
 
-  const getFileIcon = (name: string) => {
+    editor.onDidChangeCursorPosition((e) => {
+      setCursorPosition({ line: e.position.lineNumber, column: e.position.column })
+    })
+
+    // Keyboard shortcut: Ctrl+S to save
+    editor.addCommand(
+      // eslint-disable-next-line no-bitwise
+      2048 | 49, // KeyMod.CtrlCmd | KeyCode.KeyS
+      () => {
+        // Trigger save - markClean is handled by saveAll
+      }
+    )
+  }, [setCursorPosition])
+
+  const GetFileIcon = (name: string) => {
     if (name.endsWith('.ino')) return '◆'
-    if (name.endsWith('.h')) return 'H'
-    if (name.endsWith('.cpp')) return '◆'
+    if (name.endsWith('.h') || name.endsWith('.hpp')) return 'H'
+    if (name.endsWith('.cpp') || name.endsWith('.c')) return 'C'
+    if (name.endsWith('.md')) return 'M'
+    if (name.endsWith('.json')) return '{}'
+    if (name.endsWith('.ini')) return '⚙'
     return '◇'
+  }
+
+  const GetFileIconColor = (name: string) => {
+    if (name.endsWith('.ino')) return 'text-cyan-400'
+    if (name.endsWith('.h') || name.endsWith('.hpp')) return 'text-purple-400'
+    if (name.endsWith('.cpp') || name.endsWith('.c')) return 'text-blue-400'
+    if (name.endsWith('.md')) return 'text-slate-400'
+    return 'text-slate-500'
+  }
+
+  // Scroll active tab into view
+  useEffect(() => {
+    const activeTab = document.querySelector('[data-active-tab="true"]')
+    activeTab?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+  }, [project.selectedFile])
+
+  if (!activeFile && project.openFiles.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center bg-slate-950 text-slate-500">
+        <div className="text-6xl mb-4 opacity-20">◆</div>
+        <p className="text-sm">Open a file from the Explorer to start editing</p>
+        <p className="text-xs mt-1 text-slate-600">Ctrl+N to create a new file</p>
+      </div>
+    )
   }
 
   return (
@@ -105,71 +91,106 @@ void onHxtpError(HxtpError err, const char* msg, void*) {
       <div className="h-6 bg-slate-900 border-b border-slate-800 flex items-center px-3 text-xs text-slate-500 gap-1">
         {activeFile && (
           <>
-            <span>BlueLED</span>
-            <span>/</span>
+            <span>{project.name}</span>
+            <span className="text-slate-700">/</span>
             <span className="text-slate-300">{activeFile.name}</span>
+            {dirtyFiles.has(activeFile.id) && (
+              <span className="text-amber-400 ml-1">●</span>
+            )}
           </>
         )}
       </div>
 
       {/* File tabs */}
-      <div className="h-10 bg-slate-800 border-b border-slate-700 flex items-center overflow-hidden gap-1 px-1">
-        <div className="flex overflow-x-auto flex-1 items-center gap-0.5">
-          {files.map((file) => (
-            <button
-              key={file.id}
-              onClick={() => setActiveFileId(file.id)}
-              className={`h-8 px-3 py-1 rounded-t flex items-center gap-2 whitespace-nowrap transition-colors text-sm ${
-                activeFileId === file.id
-                  ? 'bg-slate-700 text-slate-100 shadow-sm'
-                  : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
-              }`}
-              title={file.name}
-            >
-              <span className="text-xs opacity-75">{getFileIcon(file.name)}</span>
-              <span>{file.name}</span>
+      <div className="h-10 bg-slate-800 border-b border-slate-700 flex items-center overflow-hidden">
+        <div className="flex overflow-x-auto flex-1 items-center gap-0.5 px-1 scrollbar-none">
+          {project.openFiles.map((fileId) => {
+            const file = getFileById(fileId)
+            if (!file) return null
+            const isActive = project.selectedFile === fileId
+            const isDirty = dirtyFiles.has(fileId)
+            return (
               <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  closeFile(file.id)
-                }}
-                className="hover:bg-slate-600 rounded p-0.5 ml-0.5 opacity-60 hover:opacity-100 transition-opacity"
+                key={fileId}
+                data-active-tab={isActive}
+                onClick={() => selectFile(fileId)}
+                className={`h-8 px-3 py-1 rounded-t flex items-center gap-2 whitespace-nowrap transition-colors text-sm group min-w-0 ${
+                  isActive
+                    ? 'bg-slate-950 text-slate-100 border-t-2 border-t-blue-500'
+                    : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
+                }`}
+                title={file.name}
               >
-                <X size={12} />
+                <span className={`text-xs ${GetFileIconColor(file.name)}`}>{GetFileIcon(file.name)}</span>
+                <span className="truncate max-w-[120px]">{file.name}</span>
+                {isDirty ? (
+                  <Circle size={8} className="text-amber-400 fill-amber-400 shrink-0" />
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      closeFile(fileId)
+                    }}
+                    className="hover:bg-slate-600 rounded p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </button>
-            </button>
-          ))}
-        </div>
-
-        {/* More options */}
-        <div className="h-8 border-l border-slate-700 flex items-center px-2">
-          <button className="text-slate-400 hover:text-slate-100 transition-colors p-1 rounded hover:bg-slate-700">
-            <ChevronRight size={16} />
-          </button>
+            )
+          })}
         </div>
       </div>
 
       {/* Editor */}
       <div className="flex-1 overflow-hidden">
-        <Editor
-          height="100%"
-          language={activeFile.language}
-          value={activeFile.content}
-          onChange={handleEditorChange}
-          theme="vs-dark"
-          options={{
-            minimap: { enabled: false },
-            fontSize: 13,
-            fontFamily: "'Fira Code', monospace",
-            lineHeight: 1.6,
-            padding: { top: 16, bottom: 16 },
-            scrollBeyondLastLine: false,
-            smoothScrolling: true,
-            cursorBlinking: 'blink',
-            contextmenu: true,
-            renderLineHighlight: 'line',
-          }}
-        />
+        {activeFile ? (
+          <Editor
+            key={activeFile.id}
+            height="100%"
+            language={activeFile.language}
+            value={activeFile.content}
+            onChange={HandleEditorChange}
+            onMount={HandleEditorMount}
+            theme="vs-dark"
+            options={{
+              minimap: { enabled: true, maxColumn: 80 },
+              fontSize: 13,
+              fontFamily: "'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
+              fontLigatures: true,
+              lineHeight: 1.6,
+              padding: { top: 12, bottom: 12 },
+              scrollBeyondLastLine: false,
+              smoothScrolling: true,
+              cursorBlinking: 'smooth',
+              cursorSmoothCaretAnimation: 'on',
+              contextmenu: true,
+              renderLineHighlight: 'all',
+              bracketPairColorization: { enabled: true },
+              autoClosingBrackets: 'always',
+              autoClosingQuotes: 'always',
+              autoIndent: 'full',
+              formatOnPaste: true,
+              tabSize: 2,
+              wordWrap: 'off',
+              rulers: [80, 120],
+              renderWhitespace: 'selection',
+              suggestOnTriggerCharacters: true,
+              quickSuggestions: { other: true, comments: false, strings: false },
+              parameterHints: { enabled: true },
+              suggest: {
+                showKeywords: true,
+                showSnippets: true,
+                showFunctions: true,
+                showVariables: true,
+              },
+            }}
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+            Select a file to edit
+          </div>
+        )}
       </div>
     </div>
   )

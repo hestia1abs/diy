@@ -1,59 +1,70 @@
 'use client'
 
-import { FileText, Search, GitBranch, Bug, BookOpen, Cpu, Grid3x3, Settings } from 'lucide-react'
+import {
+  FolderOpen, Search, Bug, BookOpen, Cpu, GitBranch, Settings, AlertCircle
+} from 'lucide-react'
+import { useConsole } from '@/lib/console-context'
+
+const PANEL_ITEMS = [
+  { id: 'explorer', icon: FolderOpen, label: 'Explorer' },
+  { id: 'search', icon: Search, label: 'Search' },
+  { id: 'debug', icon: Bug, label: 'Debug' },
+  { id: 'libraries', icon: BookOpen, label: 'Libraries' },
+  { id: 'boards', icon: Cpu, label: 'Boards' },
+  { id: 'source', icon: GitBranch, label: 'Source Control' },
+] as const
+
+type PanelId = (typeof PANEL_ITEMS)[number]['id']
 
 interface SidebarProps {
   activePanel: string
-  onPanelChange: (panel: any) => void
+  onPanelChange: (panel: string) => void
 }
 
 export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {
-  const tools = [
-    { id: 'explorer', icon: FileText, label: 'Explorer', tooltip: 'File Explorer' },
-    { id: 'search', icon: Search, label: 'Search', tooltip: 'Search Files' },
-    { id: 'source', icon: GitBranch, label: 'Source', tooltip: 'Source Control' },
-    { id: 'debug', icon: Bug, label: 'Debug', tooltip: 'Debug Console' },
-    { id: 'libraries', icon: BookOpen, label: 'Libraries', tooltip: 'Library Manager' },
-    { id: 'boards', icon: Cpu, label: 'Boards', tooltip: 'Boards Manager' },
-    { id: 'extensions', icon: Grid3x3, label: 'Extensions', tooltip: 'Extensions' },
-  ]
+  const { problems } = useConsole()
+  const errorCount = problems.filter(p => p.severity === 'error').length
 
   return (
-    <div className="w-16 bg-slate-800 border-r border-slate-700 flex flex-col items-center py-3 gap-2">
-      {tools.map((tool) => {
-        const Icon = tool.icon
-        const isActive = activePanel === tool.id
-        return (
-          <button
-            key={tool.id}
-            onClick={() => onPanelChange(tool.id)}
-            title={tool.tooltip}
-            className={`w-12 h-12 flex items-center justify-center rounded transition-colors relative group ${
-              isActive
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-400 hover:text-slate-100 hover:bg-slate-700'
-            }`}
-          >
-            <Icon size={24} />
-            
-            {/* Tooltip */}
-            <div className="absolute left-full ml-2 bg-slate-900 text-slate-100 text-xs px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-              {tool.tooltip}
-            </div>
-          </button>
-        )
-      })}
+    <div className="w-12 bg-slate-900 border-r border-slate-700 flex flex-col items-center py-2 gap-1">
+      {/* Top panel buttons */}
+      <div className="flex flex-col gap-0.5">
+        {PANEL_ITEMS.map(({ id, icon: Icon, label }) => {
+          const isActive = activePanel === id
+          return (
+            <button
+              key={id}
+              onClick={() => onPanelChange(isActive ? '' : id)}
+              title={label}
+              className={`relative w-10 h-10 flex items-center justify-center rounded transition-colors ${
+                isActive
+                  ? 'text-white bg-slate-700'
+                  : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              {isActive && (
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-blue-500 rounded-r" />
+              )}
+              <Icon size={18} />
+              {/* Badge for debug when errors exist */}
+              {id === 'debug' && errorCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-600 text-[8px] font-bold rounded-full flex items-center justify-center text-white">
+                  {errorCount > 9 ? '9+' : errorCount}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
 
-      {/* Bottom tools */}
       <div className="flex-1" />
+
+      {/* Bottom settings */}
       <button
         title="Settings"
-        className="w-12 h-12 flex items-center justify-center rounded text-slate-400 hover:text-slate-100 hover:bg-slate-700 transition-colors relative group"
+        className="w-10 h-10 flex items-center justify-center text-slate-500 hover:text-slate-200 rounded hover:bg-slate-800"
       >
-        <Settings size={24} />
-        <div className="absolute left-full ml-2 bg-slate-900 text-slate-100 text-xs px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-          Settings
-        </div>
+        <Settings size={18} />
       </button>
     </div>
   )

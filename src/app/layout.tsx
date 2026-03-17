@@ -2,15 +2,16 @@ import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ConsoleProvider } from '@/lib/console-context'
+import { ProjectProvider } from '@/lib/project-context'
 import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Hestia Cloud Editor',
-  description: 'Professional cloud-based firmware development IDE for ESP32 and Arduino boards',
-  generator: 'v0.app',
+  title: 'Hestia DIY Editor',
+  description: 'Professional browser-based firmware IDE for ESP32 and Arduino boards — powered by Hestia Labs',
+  generator: 'Hestia Labs',
   icons: {
     icon: [
       {
@@ -48,7 +49,9 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning className="dark">
       <body className="font-sans antialiased">
         <ConsoleProvider>
-          {children}
+          <ProjectProvider>
+            {children}
+          </ProjectProvider>
         </ConsoleProvider>
         <Analytics />
       </body>

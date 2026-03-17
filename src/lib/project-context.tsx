@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react'
 
 export interface ProjectFile {
   id: string
@@ -18,34 +18,51 @@ export interface Project {
   boardType: string
   files: ProjectFile[]
   selectedFile: string | null
+  openFiles: string[]
+  dependencies: string[]
+}
+
+interface CursorPosition {
+  line: number
+  column: number
 }
 
 interface ProjectContextType {
   project: Project
   setProject: (project: Project) => void
   createFile: (parentPath: string, fileName: string, content?: string) => void
+  createFolder: (parentPath: string, folderName: string) => void
   updateFile: (fileId: string, content: string) => void
   deleteFile: (fileId: string) => void
   renameFile: (fileId: string, newName: string) => void
   selectFile: (fileId: string) => void
+  openFile: (fileId: string) => void
+  closeFile: (fileId: string) => void
   getFileById: (fileId: string) => ProjectFile | null
+  getAllFiles: () => ProjectFile[]
+  dirtyFiles: Set<string>
+  markDirty: (fileId: string) => void
+  markClean: (fileId: string) => void
+  saveAll: () => void
+  cursorPosition: CursorPosition
+  setCursorPosition: (pos: CursorPosition) => void
+  importSource: (source: string, fileName?: string) => void
 }
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined)
 
-export function ProjectProvider({ children }: { children: ReactNode }) {
-  const [project, setProject] = useState<Project>(() => {
-    // Initialize with default project
-    return {
-      id: 'default-project',
-      name: 'My ESP32 Project',
-      boardType: 'ESP32-S3',
-      files: [
-        {
-          id: 'main.cpp',
-          name: 'main.cpp',
-          path: '/main.cpp',
-          content: `#include <Arduino.h>
+const DEFAULT_PROJECT: Project = {
+  id: 'default-project',
+  name: 'My ESP32 Project',
+  boardType: 'esp32',
+  openFiles: ['main.ino'],
+  dependencies: [],
+  files: [
+    {
+      id: 'main.ino',
+      name: 'main.ino',
+      path: '/main.ino',
+      content: `#include <Arduino.h>
 
 void setup() {
   Serial.begin(115200);
@@ -60,80 +77,143 @@ void loop() {
   delay(1000);
 }
 `,
-          language: 'cpp',
-          isFolder: false,
-        },
-        {
-          id: 'platformio.ini',
-          name: 'platformio.ini',
-          path: '/platformio.ini',
-          content: `[env:esp32-s3-devkitc-1]
-platform = espressif32
-board = esp32-s3-devkitc-1
-framework = arduino
-monitor_speed = 115200
-`,
-          language: 'ini',
-          isFolder: false,
-        },
-        {
-          id: 'readme',
-          name: 'README.md',
-          path: '/README.md',
-          content: `# ESP32 Project
+      language: 'cpp',
+      isFolder: false,
+    },
+    {
+      id: 'config.h',
+      name: 'config.h',
+      path: '/config.h',
+      content: `#ifndef CONFIG_H
+#define CONFIG_H
 
-A professional firmware development project for ESP32.
+// Board Configuration
+#define BOARD_TYPE ESP32_DEV_MODULE
+#define CLOCK_SPEED 240
+
+// Network Configuration
+#define WIFI_SSID "your_ssid"
+#define WIFI_PASSWORD "your_password"
+
+// Device Configuration
+#define DEVICE_NAME "MyDevice"
+#define FIRMWARE_VERSION "1.0.0"
+
+// Pin Definitions
+#define LED_PIN 13
+#define BUTTON_PIN 2
+
+#endif
+`,
+      language: 'cpp',
+      isFolder: false,
+    },
+    {
+      id: 'readme',
+      name: 'README.md',
+      path: '/README.md',
+      content: `# ESP32 Project
+
+A firmware development project for ESP32.
 
 ## Files
-- \`main.cpp\` - Main application code
-- \`platformio.ini\` - PlatformIO configuration
+- \`main.ino\` - Main application code
+- \`config.h\` - Configuration header
 
 ## Building
 Click the "Compile" button to build the project.
-
-## Flashing
-Select your device and click "Flash" to upload the firmware.
 `,
-          language: 'markdown',
-          isFolder: false,
-        },
-      ],
-      selectedFile: 'main.cpp',
-    }
-  })
+      language: 'markdown',
+      isFolder: false,
+    },
+  ],
+  selectedFile: 'main.ino',
+}
+
+export function ProjectProvider({ children }: { children: ReactNode }) {
+  const [project, setProject] = useState<Project>(() => DEFAULT_PROJECT)
+  const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set())
+  const [cursorPosition, setCursorPosition] = useState<CursorPosition>({ line: 1, column: 1 })
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Load from localStorage on mount
   useEffect(() => {
     const savedProject = localStorage.getItem('hestia-project')
     if (savedProject) {
       try {
-        setProject(JSON.parse(savedProject))
-      } catch (e) {
-        console.log('[v0] Failed to load project from localStorage')
+        const parsed = JSON.parse(savedProject)
+        // Ensure new fields exist with defaults
+        if (!parsed.openFiles) parsed.openFiles = [parsed.selectedFile || parsed.files?.[0]?.id].filter(Boolean)
+        if (!parsed.dependencies) parsed.dependencies = []
+        setProject(parsed)
+      } catch {
+        console.warn('[DIY] Failed to load project from localStorage')
+      }
+    }
+
+    // Check for imported source from URL
+    const params = new URLSearchParams(window.location.search)
+    const sourceParam = params.get('source')
+    if (sourceParam) {
+      try {
+        const decoded = decodeURIComponent(escape(atob(sourceParam)))
+        const importedFile: ProjectFile = {
+          id: 'imported.ino',
+          name: 'imported.ino',
+          path: '/imported.ino',
+          content: decoded,
+          language: 'cpp',
+          isFolder: false,
+        }
+        setProject((prev) => ({
+          ...prev,
+          files: [...prev.files.filter((f) => f.id !== 'imported.ino'), importedFile],
+          selectedFile: 'imported.ino',
+          openFiles: [...new Set([...prev.openFiles, 'imported.ino'])],
+        }))
+        // Clean URL
+        window.history.replaceState({}, '', window.location.pathname)
+      } catch {
+        console.warn('[DIY] Failed to decode imported source')
       }
     }
   }, [])
 
-  // Save to localStorage whenever project changes
+  // Debounced save to localStorage
   useEffect(() => {
-    localStorage.setItem('hestia-project', JSON.stringify(project))
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      localStorage.setItem('hestia-project', JSON.stringify(project))
+    }, 500)
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    }
   }, [project])
 
-  const findFileById = (fileId: string, files: ProjectFile[]): ProjectFile | null => {
+  const FindFileById = useCallback((fileId: string, files: ProjectFile[]): ProjectFile | null => {
     for (const file of files) {
       if (file.id === fileId) return file
       if (file.children) {
-        const found = findFileById(fileId, file.children)
+        const found = FindFileById(fileId, file.children)
         if (found) return found
       }
     }
     return null
-  }
+  }, [])
 
-  const updateFileInTree = (
+  const CollectAllFiles = useCallback((files: ProjectFile[]): ProjectFile[] => {
+    const result: ProjectFile[] = []
+    for (const file of files) {
+      if (!file.isFolder) result.push(file)
+      if (file.children) result.push(...CollectAllFiles(file.children))
+    }
+    return result
+  }, [])
+
+  const UpdateFileInTree = useCallback((
     fileId: string,
     updater: (file: ProjectFile) => void,
-    files: ProjectFile[]
+    files: ProjectFile[],
   ): ProjectFile[] => {
     return files.map((file) => {
       if (file.id === fileId) {
@@ -142,73 +222,151 @@ Select your device and click "Flash" to upload the firmware.
         return updated
       }
       if (file.children) {
-        return {
-          ...file,
-          children: updateFileInTree(fileId, updater, file.children),
-        }
+        return { ...file, children: UpdateFileInTree(fileId, updater, file.children) }
       }
       return file
     })
-  }
+  }, [])
 
-  const deleteFileFromTree = (fileId: string, files: ProjectFile[]): ProjectFile[] => {
+  const DeleteFileFromTree = useCallback((fileId: string, files: ProjectFile[]): ProjectFile[] => {
     return files
       .filter((file) => file.id !== fileId)
       .map((file) => ({
         ...file,
-        children: file.children ? deleteFileFromTree(fileId, file.children) : file.children,
+        children: file.children ? DeleteFileFromTree(fileId, file.children) : file.children,
       }))
-  }
+  }, [])
 
   const value: ProjectContextType = {
     project,
     setProject,
+    cursorPosition,
+    setCursorPosition,
+    dirtyFiles,
+
+    markDirty: (fileId: string) => {
+      setDirtyFiles((prev) => new Set(prev).add(fileId))
+    },
+
+    markClean: (fileId: string) => {
+      setDirtyFiles((prev) => {
+        const next = new Set(prev)
+        next.delete(fileId)
+        return next
+      })
+    },
+
+    saveAll: () => {
+      setDirtyFiles(new Set())
+      localStorage.setItem('hestia-project', JSON.stringify(project))
+    },
+
     selectFile: (fileId: string) => {
       setProject((prev) => ({ ...prev, selectedFile: fileId }))
     },
-    getFileById: (fileId: string) => findFileById(fileId, project.files),
+
+    openFile: (fileId: string) => {
+      setProject((prev) => ({
+        ...prev,
+        selectedFile: fileId,
+        openFiles: prev.openFiles.includes(fileId) ? prev.openFiles : [...prev.openFiles, fileId],
+      }))
+    },
+
+    closeFile: (fileId: string) => {
+      setProject((prev) => {
+        const newOpen = prev.openFiles.filter((id) => id !== fileId)
+        const newSelected = prev.selectedFile === fileId
+          ? (newOpen[newOpen.length - 1] || null)
+          : prev.selectedFile
+        return { ...prev, openFiles: newOpen, selectedFile: newSelected }
+      })
+      setDirtyFiles((prev) => {
+        const next = new Set(prev)
+        next.delete(fileId)
+        return next
+      })
+    },
+
+    getFileById: (fileId: string) => FindFileById(fileId, project.files),
+
+    getAllFiles: () => CollectAllFiles(project.files),
+
     updateFile: (fileId: string, content: string) => {
       setProject((prev) => ({
         ...prev,
-        files: updateFileInTree(fileId, (file) => {
-          file.content = content
-        }, prev.files),
+        files: UpdateFileInTree(fileId, (file) => { file.content = content }, prev.files),
       }))
     },
+
     createFile: (parentPath: string, fileName: string, content = '') => {
       const newFile: ProjectFile = {
         id: `${parentPath}/${fileName}`.replace(/^\/+/, ''),
         name: fileName,
         path: `${parentPath}/${fileName}`,
         content,
-        language: getLanguageFromFileName(fileName),
+        language: GetLanguageFromFileName(fileName),
         isFolder: false,
       }
-
       setProject((prev) => ({
         ...prev,
         files: [...prev.files, newFile],
         selectedFile: newFile.id,
+        openFiles: [...prev.openFiles, newFile.id],
       }))
     },
+
+    createFolder: (parentPath: string, folderName: string) => {
+      const newFolder: ProjectFile = {
+        id: `${parentPath}/${folderName}`.replace(/^\/+/, ''),
+        name: folderName,
+        path: `${parentPath}/${folderName}`,
+        content: '',
+        language: '',
+        isFolder: true,
+        children: [],
+      }
+      setProject((prev) => ({
+        ...prev,
+        files: [...prev.files, newFolder],
+      }))
+    },
+
     deleteFile: (fileId: string) => {
       setProject((prev) => {
-        const newProject = { ...prev }
-        newProject.files = deleteFileFromTree(fileId, prev.files)
-        // Deselect if deleted file was selected
-        if (prev.selectedFile === fileId) {
-          newProject.selectedFile = prev.files[0]?.id || null
-        }
-        return newProject
+        const newFiles = DeleteFileFromTree(fileId, prev.files)
+        const newOpen = prev.openFiles.filter((id) => id !== fileId)
+        const newSelected = prev.selectedFile === fileId
+          ? (newOpen[0] || null)
+          : prev.selectedFile
+        return { ...prev, files: newFiles, openFiles: newOpen, selectedFile: newSelected }
       })
     },
+
     renameFile: (fileId: string, newName: string) => {
       setProject((prev) => ({
         ...prev,
-        files: updateFileInTree(fileId, (file) => {
+        files: UpdateFileInTree(fileId, (file) => {
           file.name = newName
-          file.language = getLanguageFromFileName(newName)
+          file.language = GetLanguageFromFileName(newName)
         }, prev.files),
+      }))
+    },
+
+    importSource: (source: string, fileName = 'imported.ino') => {
+      const importedFile: ProjectFile = {
+        id: fileName,
+        name: fileName,
+        path: `/${fileName}`,
+        content: source,
+        language: GetLanguageFromFileName(fileName),
+        isFolder: false,
+      }
+      setProject((prev) => ({
+        ...prev,
+        files: [...prev.files.filter((f) => f.id !== fileName), importedFile],
+        selectedFile: fileName,
+        openFiles: [...new Set([...prev.openFiles, fileName])],
       }))
     },
   }
@@ -218,30 +376,17 @@ Select your device and click "Flash" to upload the firmware.
 
 export function useProject() {
   const context = useContext(ProjectContext)
-  if (!context) {
-    throw new Error('useProject must be used within ProjectProvider')
-  }
+  if (!context) throw new Error('useProject must be used within ProjectProvider')
   return context
 }
 
-function getLanguageFromFileName(fileName: string): string {
+function GetLanguageFromFileName(fileName: string): string {
   const ext = fileName.split('.').pop()?.toLowerCase()
   const languageMap: Record<string, string> = {
-    cpp: 'cpp',
-    c: 'c',
-    h: 'cpp',
-    hpp: 'cpp',
-    ino: 'cpp',
-    py: 'python',
-    js: 'javascript',
-    ts: 'typescript',
-    json: 'json',
-    xml: 'xml',
-    html: 'html',
-    css: 'css',
-    md: 'markdown',
-    ini: 'ini',
-    txt: 'plaintext',
+    cpp: 'cpp', c: 'c', h: 'cpp', hpp: 'cpp', ino: 'cpp',
+    py: 'python', js: 'javascript', ts: 'typescript',
+    json: 'json', xml: 'xml', html: 'html', css: 'css',
+    md: 'markdown', ini: 'ini', txt: 'plaintext',
   }
   return languageMap[ext || ''] || 'plaintext'
 }

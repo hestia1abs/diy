@@ -1,110 +1,80 @@
 'use client'
 
-import { Search, Trash2, Download, ChevronDown } from 'lucide-react'
-import { useState } from 'react'
+import { Search, Cpu } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { useProject } from '@/lib/project-context'
+
+interface Board {
+  id: string
+  name: string
+  platform: string
+  architecture: string
+}
+
+const BOARD_CATALOG: Board[] = [
+  { id: 'esp32', name: 'ESP32 Dev Module', platform: 'Espressif', architecture: 'esp32' },
+  { id: 'esp32s3', name: 'ESP32-S3 DevKitC-1', platform: 'Espressif', architecture: 'esp32s3' },
+  { id: 'esp32c3', name: 'ESP32-C3 DevKitM-1', platform: 'Espressif', architecture: 'esp32c3' },
+  { id: 'esp8266', name: 'NodeMCU 1.0 (ESP-12E)', platform: 'ESP8266', architecture: 'esp8266' },
+  { id: 'wroom32', name: 'ESP32-WROOM-32', platform: 'Espressif', architecture: 'esp32' },
+  { id: 'lolin32', name: 'WEMOS LOLIN32', platform: 'Espressif', architecture: 'esp32' },
+  { id: 'ttgo', name: 'TTGO T-Display', platform: 'Espressif', architecture: 'esp32' },
+]
 
 export function BoardsPanel() {
-  const [searchTerm, setSearchTerm] = useState('')
-  const [filter, setFilter] = useState('all')
+  const { project, setProject } = useProject()
+  const [searchQuery, setSearchQuery] = useState('')
 
-  const boards = [
-    {
-      id: 1,
-      name: 'Arduino AVR Boards',
-      author: 'Arduino',
-      version: '1.8.7',
-      status: 'installed',
-      count: '15 boards',
-      details: 'Boards included in this package: Arduino Leonardo, Arduino Leonardo ETH, Arduino Micro...',
-    },
-    {
-      id: 2,
-      name: 'Arduino ESP32 Boards',
-      author: 'Arduino',
-      version: '2.0.18',
-      status: 'installed',
-      count: '8 boards',
-      details: 'Boards included in this package: Arduino Nano ESP32, Arduino Pro Mini...',
-    },
-    {
-      id: 3,
-      name: 'Arduino Mbed OS Edge Boards',
-      author: 'Arduino',
-      version: '4.5.0',
-      status: 'available',
-      count: '5 boards',
-      details: 'Boards included in this package: Arduino Edge Control...',
-    },
-  ]
+  const filtered = useMemo(() => {
+    if (!searchQuery.trim()) return BOARD_CATALOG
+    const q = searchQuery.toLowerCase()
+    return BOARD_CATALOG.filter(b => b.name.toLowerCase().includes(q) || b.platform.toLowerCase().includes(q))
+  }, [searchQuery])
 
   return (
     <div className="flex flex-col h-full bg-slate-900 border-r border-slate-700 overflow-hidden">
-      {/* Header */}
       <div className="h-12 border-b border-slate-700 flex items-center px-4">
-        <span className="text-sm font-semibold text-slate-200">BOARDS MANAGER</span>
+        <span className="text-xs font-semibold text-slate-400 tracking-wider">BOARDS MANAGER</span>
       </div>
 
-      {/* Search */}
-      <div className="border-b border-slate-700 p-3">
-        <div className="flex items-center bg-slate-800 rounded px-2 py-1">
-          <Search size={16} className="text-slate-500" />
+      <div className="p-3 border-b border-slate-700">
+        <div className="flex items-center bg-slate-800 rounded px-2 py-1.5 border border-slate-700">
+          <Search size={14} className="text-slate-500" />
           <input
-            type="text"
-            placeholder="Filter your search..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="flex-1 ml-2 bg-transparent outline-none text-sm text-slate-200 placeholder-slate-500"
+            placeholder="Filter boards..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="flex-1 ml-2 bg-transparent outline-none text-xs text-slate-200 placeholder-slate-500"
           />
         </div>
-
-        <div className="mt-3">
-          <select className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-300 hover:border-slate-600 transition-colors">
-            <option>Type: All</option>
-            <option>Type: Arduino Official</option>
-            <option>Type: Community</option>
-          </select>
-        </div>
       </div>
 
-      {/* Boards list */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {boards.map(board => (
-          <div key={board.id} className="border border-slate-700 rounded p-3 bg-slate-800 hover:border-slate-600 transition-colors">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
+      <div className="flex-1 overflow-y-auto">
+        {filtered.map((board) => {
+          const isSelected = project.boardType === board.id
+          return (
+            <button
+              key={board.id}
+              onClick={() => setProject({ ...project, boardType: board.id })}
+              className={`w-full text-left px-4 py-3 border-b border-slate-800 transition-colors flex items-start gap-3 ${
+                isSelected ? 'bg-blue-600/10' : 'hover:bg-slate-800/50'
+              }`}
+            >
+              <Cpu size={16} className={`mt-0.5 shrink-0 ${isSelected ? 'text-blue-400' : 'text-slate-500'}`} />
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-semibold text-slate-100">{board.name}</h3>
-                  <span className="text-xs text-cyan-400 bg-cyan-900 px-2 py-0.5 rounded">
-                    {board.count}
+                  <span className={`text-xs font-semibold ${isSelected ? 'text-blue-300' : 'text-slate-200'}`}>
+                    {board.name}
                   </span>
+                  {isSelected && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-600 text-white font-bold">SELECTED</span>
+                  )}
                 </div>
-                <p className="text-xs text-slate-400 mt-1">by {board.author}</p>
-                <p className="text-xs text-slate-400 mt-2 leading-relaxed">{board.details}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">{board.platform} · {board.architecture}</p>
               </div>
-            </div>
-
-            {/* Version and action */}
-            <div className="mt-3 flex items-center gap-2">
-              <select className="text-xs bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-200 hover:bg-slate-600 transition-colors">
-                <option>{board.version}</option>
-                <option>2.0.17</option>
-                <option>2.0.16</option>
-              </select>
-
-              {board.status === 'installed' ? (
-                <button className="ml-auto text-xs px-3 py-1 bg-slate-700 text-slate-300 rounded hover:bg-slate-600 transition-colors flex items-center gap-1">
-                  <Trash2 size={12} />
-                  REMOVE
-                </button>
-              ) : (
-                <button className="ml-auto text-xs px-3 py-1 bg-cyan-600 text-white rounded hover:bg-cyan-700 transition-colors flex items-center gap-1">
-                  <Download size={12} />
-                  INSTALL
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
