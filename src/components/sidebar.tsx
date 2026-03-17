@@ -14,11 +14,11 @@ const PANEL_ITEMS = [
   { id: 'source', icon: GitBranch, label: 'Source Control' },
 ] as const
 
-type PanelId = (typeof PANEL_ITEMS)[number]['id']
+export type PanelId = (typeof PANEL_ITEMS)[number]['id']
 
 interface SidebarProps {
-  activePanel: string
-  onPanelChange: (panel: string) => void
+  activePanel: PanelId | string
+  onPanelChange: (panel: PanelId | string) => void
 }
 
 export function Sidebar({ activePanel, onPanelChange }: SidebarProps) {

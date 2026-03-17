@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { MenuBar } from './menu-bar'
-import { Sidebar } from './sidebar'
+import { Sidebar, type PanelId } from './sidebar'
 import { EditorPanel } from './editor-panel'
 import { ToolPanels } from './tool-panels'
 import { StatusBar } from './status-bar'
@@ -15,7 +15,7 @@ import { SourcePanel } from './source-panel'
 import { CompileToolbar } from './compile-toolbar'
 
 export function IDEShell() {
-  const [activePanel, setActivePanel] = useState<'explorer' | 'search' | 'source' | 'debug' | 'libraries' | 'boards' | 'extensions'>('explorer')
+  const [activePanel, setActivePanel] = useState<PanelId | string>('explorer')
   const [showLeftPanel, setShowLeftPanel] = useState(true)
 
   const renderLeftPanel = () => {
